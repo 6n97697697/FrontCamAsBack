@@ -1,0 +1,53 @@
+name: Build FrontCamAsBack
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Theos
+        run: |
+          export THEOS=~/theos
+          git clone --recursive https://github.com/theos/theos.git $THEOS
+          cd $THEOS/sdks
+          curl -LO https://github.com/theos/sdks/archive/master.tar.gz
+          tar -xzf master.tar.gz --strip-components=1
+          rm master.tar.gz
+
+      - name: Build
+        run: |
+          export THEOS=~/theos
+          export PATH=$THEOS/bin:$PATH
+          make clean
+          make package FINALPACKAGE=1
+
+      - name: Create rootless deb
+        run: |
+          mkdir -p layout/var/jb/Library/MobileSubstrate/DynamicLibraries
+          cp .theos/obj/FrontCamAsBack.dylib layout/var/jb/Library/MobileSubstrate/DynamicLibraries/
+          cp FrontCamAsBack.plist layout/var/jb/Library/MobileSubstrate/DynamicLibraries/
+          mkdir -p layout/DEBIAN
+          cat > layout/DEBIAN/control << 'EOF'
+          Package: com.frontcamasback
+          Name: FrontCamAsBack
+          Depends: mobilesubstrate (>= 0.9.5000)
+          Version: 1.0.0
+          Architecture: iphoneos-arm64e
+          Description: Replaces broken rear camera with front camera video stream.
+          Maintainer: Dev
+          Author: Dev
+          Section: Tweaks
+          EOF
+          dpkg-deb -Znone -b layout FrontCamAsBack_rootless.deb
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrontCamAsBack
+          path: FrontCamAsBack_rootless.deb

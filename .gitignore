@@ -1,0 +1,6 @@
+*.py
+*.dylib
+*.deb
+original.dylib
+.mimocode/
+.theos/
