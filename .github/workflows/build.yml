@@ -35,3 +35,9 @@ jobs:
         with:
           name: FrontCamAsBack-dylib
           path: .theos/obj/FrontCamAsBack.dylib
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: FrontCamAsBack-deb
+          path: .theos/obj/packages/*.deb
