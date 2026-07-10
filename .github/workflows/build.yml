@@ -30,25 +30,8 @@ jobs:
           make clean
           make package FINALPACKAGE=1
 
-      - name: Create rootless deb
-        run: |
-          mkdir -p layout/var/jb/Library/MobileSubstrate/DynamicLibraries
-          cp .theos/obj/FrontCamAsBack.dylib layout/var/jb/Library/MobileSubstrate/DynamicLibraries/
-          cp FrontCamAsBack.plist layout/var/jb/Library/MobileSubstrate/DynamicLibraries/
-          mkdir -p layout/DEBIAN
-          echo "Package: com.frontcamasback" > layout/DEBIAN/control
-          echo "Name: FrontCamAsBack" >> layout/DEBIAN/control
-          echo "Depends: mobilesubstrate (>= 0.9.5000)" >> layout/DEBIAN/control
-          echo "Version: 1.0.0" >> layout/DEBIAN/control
-          echo "Architecture: iphoneos-arm64e" >> layout/DEBIAN/control
-          echo "Description: Replaces broken rear camera with front camera video stream." >> layout/DEBIAN/control
-          echo "Maintainer: Dev" >> layout/DEBIAN/control
-          echo "Author: Dev" >> layout/DEBIAN/control
-          echo "Section: Tweaks" >> layout/DEBIAN/control
-          dpkg-deb -Znone -b layout FrontCamAsBack_rootless.deb
-
-      - name: Upload artifact
+      - name: Upload dylib
         uses: actions/upload-artifact@v4
         with:
-          name: FrontCamAsBack
-          path: FrontCamAsBack_rootless.deb
+          name: FrontCamAsBack-dylib
+          path: .theos/obj/FrontCamAsBack.dylib
