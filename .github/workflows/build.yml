@@ -14,10 +14,10 @@ jobs:
       - name: Install ldid
         run: brew install ldid
 
-      - name: Setup roothide/theos
+      - name: Setup Theos
         run: |
           export THEOS=~/theos
-          git clone --recursive https://github.com/roothide/theos.git $THEOS
+          git clone --recursive https://github.com/theos/theos.git $THEOS
           cd $THEOS/sdks
           curl -LO https://github.com/theos/sdks/archive/master.tar.gz
           tar -xzf master.tar.gz --strip-components=1
@@ -27,7 +27,7 @@ jobs:
         run: |
           export THEOS=~/theos
           export PATH=$THEOS/bin:$PATH
-          export THEOS_PACKAGE_SCHEME=roothide
+          export THEOS_PACKAGE_SCHEME=rootless
           make clean
           make package FINALPACKAGE=1
 
