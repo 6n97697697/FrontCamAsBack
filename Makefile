@@ -7,7 +7,6 @@ TWEAK_NAME = FrontCamAsBack
 
 FrontCamAsBack_FILES = Tweak.xm
 FrontCamAsBack_CFLAGS = -fobjc-arc
-FrontCamAsBack_FRAMEWORKS = AVFoundation CoreMedia CoreVideo UIKit
-FrontCamAsBack_ENTITLEMENTS = entitlements.plist
+FrontCamAsBack_FRAMEWORKS = UIKit
 
 include $(THEOS_MAKE_PATH)/tweak.mk
