@@ -36,17 +36,15 @@ jobs:
           cp .theos/obj/FrontCamAsBack.dylib layout/var/jb/Library/MobileSubstrate/DynamicLibraries/
           cp FrontCamAsBack.plist layout/var/jb/Library/MobileSubstrate/DynamicLibraries/
           mkdir -p layout/DEBIAN
-          cat > layout/DEBIAN/control << 'EOF'
-          Package: com.frontcamasback
-          Name: FrontCamAsBack
-          Depends: mobilesubstrate (>= 0.9.5000)
-          Version: 1.0.0
-          Architecture: iphoneos-arm64e
-          Description: Replaces broken rear camera with front camera video stream.
-          Maintainer: Dev
-          Author: Dev
-          Section: Tweaks
-          EOF
+          echo "Package: com.frontcamasback" > layout/DEBIAN/control
+          echo "Name: FrontCamAsBack" >> layout/DEBIAN/control
+          echo "Depends: mobilesubstrate (>= 0.9.5000)" >> layout/DEBIAN/control
+          echo "Version: 1.0.0" >> layout/DEBIAN/control
+          echo "Architecture: iphoneos-arm64e" >> layout/DEBIAN/control
+          echo "Description: Replaces broken rear camera with front camera video stream." >> layout/DEBIAN/control
+          echo "Maintainer: Dev" >> layout/DEBIAN/control
+          echo "Author: Dev" >> layout/DEBIAN/control
+          echo "Section: Tweaks" >> layout/DEBIAN/control
           dpkg-deb -Znone -b layout FrontCamAsBack_rootless.deb
 
       - name: Upload artifact
