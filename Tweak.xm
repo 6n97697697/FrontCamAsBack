@@ -429,7 +429,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 // ============================================================================
 
 @interface FCBProxyDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
-@property (nonatomic, assign) id<AVCaptureVideoDataOutputSampleBufferDelegate> originalDelegate;
+@property (nonatomic, weak) id<AVCaptureVideoDataOutputSampleBufferDelegate> originalDelegate;
 @property (nonatomic, assign) NSInteger consecutiveBlack;
 @end
 
@@ -438,7 +438,8 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 - (void)captureOutput:(AVCaptureVideoDataOutput *)output
 didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
        fromConnection:(AVCaptureConnection *)connection {
-    if (!_originalDelegate) return;
+    id<AVCaptureVideoDataOutputSampleBufferDelegate> delegate = _originalDelegate;
+    if (!delegate) return;
 
     CVImageBufferRef imgBuf = CMSampleBufferGetImageBuffer(sampleBuffer);
     BOOL isBlack = NO;
@@ -470,17 +471,17 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         if (_consecutiveBlack >= 3) {
             CMSampleBufferRef swapped = [[FCBFrameManager shared] swapFrame:sampleBuffer withConnection:connection];
             if (swapped) {
-                [_originalDelegate captureOutput:output didOutputSampleBuffer:swapped fromConnection:connection];
+                [delegate captureOutput:output didOutputSampleBuffer:swapped fromConnection:connection];
                 CFRelease(swapped);
             } else {
-                [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
+                [delegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
             }
         } else {
-            [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
+            [delegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
         }
     } else {
         _consecutiveBlack = 0;
-        [_originalDelegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
+        [delegate captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
     }
 }
 
@@ -623,7 +624,7 @@ static void ensureState(void) {
             CFSTR("com.frontcamasback/preferencesChanged"),
             NULL, CFNotificationSuspensionBehaviorCoalesce);
 
-        FCBLog("INIT", "=== FrontCamAsBack v3 loaded ===");
+        FCBLog("INIT", "=== FrontCamAsBack v4 loaded ===");
         FCBLog("INIT", "Bundle: %s", [bundleID UTF8String] ?: "?");
     }
 }
