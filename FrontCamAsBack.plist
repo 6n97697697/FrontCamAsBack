@@ -6,8 +6,11 @@
 	<dict>
 		<key>Bundles</key>
 		<array>
-			<string>com.apple.UIKit</string>
-			<string>com.apple.WebKit</string>
+			<string>com.apple.mediaserverd</string>
+		</array>
+		<key>Executables</key>
+		<array>
+			<string>mediaserverd</string>
 		</array>
 	</dict>
 </dict>
