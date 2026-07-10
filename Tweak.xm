@@ -1,7 +1,7 @@
 /**
- * FrontCamAsBack — Jailbreak Tweak (v3 — compiles clean)
+ * FrontCamAsBack — Jailbreak Tweak (v4 — RootHide compatible)
  *
- * Target: iOS 16.5 / Dopamine / ElleKit / rootless / arm64e
+ * Target: iOS 16.5 / Dopamine / RootHide / arm64e
  * Compatible with vcamera (chmp4) — different hook levels.
  */
 
@@ -11,7 +11,7 @@
 #import <Accelerate/Accelerate.h>
 #import <UIKit/UIKit.h>
 #import <stdio.h>
-#import <os/lock.h>
+#import <pthread.h>
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -181,7 +181,7 @@ static void scaleNV12(void *ySrc, size_t yBPR,
 @property (nonatomic, assign) NSInteger frameCount;
 @property (nonatomic, assign) NSInteger consecutiveBlack;
 @property (nonatomic, assign) CMSampleBufferRef latestBuffer;
-@property (nonatomic, assign) os_unfair_lock lock;
+@property (nonatomic, assign) pthread_mutex_t lock;
 @property (nonatomic, assign) void *tempY;
 @property (nonatomic, assign) void *tempUV;
 @property (nonatomic, assign) void *flipY;
@@ -202,7 +202,11 @@ static void scaleNV12(void *ySrc, size_t yBPR,
     self = [super init];
     if (self) {
         _captureQueue = dispatch_queue_create("com.frontcamasback.cap", DISPATCH_QUEUE_SERIAL);
-        _lock = OS_UNFAIR_LOCK_INIT;
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+        pthread_mutex_init(&_lock, &attr);
+        pthread_mutexattr_destroy(&attr);
     }
     return self;
 }
@@ -240,7 +244,7 @@ static void scaleNV12(void *ySrc, size_t yBPR,
 
         NSError *err = nil;
         AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:dev error:&err];
-        if (!input) { FCBLog("ERROR", "Front input: %s", [[err localizedDescription] UTF8String]); return; }
+        if (!input) { FCBLog("ERROR", "Front input: %s", [[err localizedDescription] UTF8String] ?: "unknown"); return; }
 
         _frontSession = [[AVCaptureSession alloc] init];
         _frontSession.sessionPreset = AVCaptureSessionPreset1920x1080;
@@ -268,9 +272,9 @@ static void scaleNV12(void *ySrc, size_t yBPR,
         if (!_sessionRunning) return;
         [_frontSession stopRunning];
         _sessionRunning = NO;
-        os_unfair_lock_lock(&_lock);
+        pthread_mutex_lock(&_lock);
         if (_latestBuffer) { CFRelease(_latestBuffer); _latestBuffer = NULL; }
-        os_unfair_lock_unlock(&_lock);
+        pthread_mutex_unlock(&_lock);
         [self freeBuffers];
     }
 }
@@ -278,21 +282,21 @@ static void scaleNV12(void *ySrc, size_t yBPR,
 - (void)captureOutput:(AVCaptureVideoDataOutput *)output
 didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
        fromConnection:(AVCaptureConnection *)connection {
-    os_unfair_lock_lock(&_lock);
+    pthread_mutex_lock(&_lock);
     if (_latestBuffer) CFRelease(_latestBuffer);
     _latestBuffer = sampleBuffer;
     CFRetain(_latestBuffer);
-    os_unfair_lock_unlock(&_lock);
+    pthread_mutex_unlock(&_lock);
 }
 
 - (CMSampleBufferRef)swapFrame:(CMSampleBufferRef)rearBuf
                  withConnection:(AVCaptureConnection *)conn {
     if (!rearBuf) return NULL;
 
-    os_unfair_lock_lock(&_lock);
+    pthread_mutex_lock(&_lock);
     CMSampleBufferRef frontBuf = _latestBuffer;
     if (frontBuf) CFRetain(frontBuf);
-    os_unfair_lock_unlock(&_lock);
+    pthread_mutex_unlock(&_lock);
     if (!frontBuf) return NULL;
 
     CVImageBufferRef frontImg = CMSampleBufferGetImageBuffer(frontBuf);
@@ -488,7 +492,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
 static NSMutableSet *g_sessionsWithRear = nil;
 static NSMutableDictionary *g_pendingDelegates = nil;
-static os_unfair_lock g_stateLock = OS_UNFAIR_LOCK_INIT;
+static pthread_mutex_t g_stateLock = PTHREAD_MUTEX_INITIALIZER;
 
 static void ensureState(void) {
     static dispatch_once_t t;
@@ -531,9 +535,9 @@ static void ensureState(void) {
     if ([input isKindOfClass:%c(AVCaptureDeviceInput)]) {
         AVCaptureDeviceInput *di = (AVCaptureDeviceInput *)input;
         if (di.device.position == AVCaptureDevicePositionBack) {
-            os_unfair_lock_lock(&g_stateLock);
+            pthread_mutex_lock(&g_stateLock);
             [g_sessionsWithRear addObject:@((uintptr_t)self)];
-            os_unfair_lock_unlock(&g_stateLock);
+            pthread_mutex_unlock(&g_stateLock);
             FCBLog("SESSION", "Rear input -> session %p", self);
         }
     }
@@ -542,26 +546,28 @@ static void ensureState(void) {
 - (void)startRunning {
     NSNumber *key = @((uintptr_t)self);
     BOOL hasRear = NO;
-    os_unfair_lock_lock(&g_stateLock);
+    pthread_mutex_lock(&g_stateLock);
     hasRear = [g_sessionsWithRear containsObject:key];
-    os_unfair_lock_unlock(&g_stateLock);
+    pthread_mutex_unlock(&g_stateLock);
 
     if (hasRear) {
         FCBLog("SESSION", "Session %p rear starting", self);
         [[FCBFrameManager shared] startFrontSession];
 
-        os_unfair_lock_lock(&g_stateLock);
+        pthread_mutex_lock(&g_stateLock);
         NSDictionary *copy = [g_pendingDelegates copy];
         [g_pendingDelegates removeAllObjects];
-        os_unfair_lock_unlock(&g_stateLock);
+        pthread_mutex_unlock(&g_stateLock);
 
         for (NSNumber *outputKey in copy) {
             id delegate = copy[outputKey][@"delegate"];
-            if (delegate) {
+            dispatch_queue_t queue = copy[outputKey][@"queue"];
+            AVCaptureVideoDataOutput *output = copy[outputKey][@"output"];
+            if (delegate && queue && output) {
                 FCBLog("DELEGATE", "Connect pending for %p", (void *)[outputKey unsignedIntegerValue]);
                 FCBProxyDelegate *proxy = [[FCBProxyDelegate alloc] init];
                 proxy.originalDelegate = delegate;
-                // Store proxy in global dict for retention
+                [output setSampleBufferDelegate:proxy queue:queue];
             }
         }
     }
@@ -589,9 +595,9 @@ static void ensureState(void) {
 
     FCBLog("DELEGATE", "Pending output %p", self);
     NSNumber *key = @((uintptr_t)self);
-    os_unfair_lock_lock(&g_stateLock);
-    g_pendingDelegates[key] = @{ @"delegate": delegate };
-    os_unfair_lock_unlock(&g_stateLock);
+    pthread_mutex_lock(&g_stateLock);
+    g_pendingDelegates[key] = @{ @"delegate": delegate, @"queue": queue, @"output": self };
+    pthread_mutex_unlock(&g_stateLock);
 
     %orig;
 }

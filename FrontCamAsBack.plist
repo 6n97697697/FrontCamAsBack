@@ -1,1 +1,14 @@
-{ Filter = { Bundles = ( "com.apple.mobileslideshow", "com.apple.camera", "com.apple.MobileSMS", "com.apple.mobilesafari", "com.apple.WebKit", "com.apple.mobilemail", "com.apple.mobilecal", "com.apple.podcasts", "com.apple.Music", "com.apple.AppStore", "com.apple.Preferences", "com.apple.mobiletimer", "com.apple.weather", "com.apple.maps", "com.apple.Maps", "com.apple.calculator", "com.apple.compass", "com.apple.VoiceMemos", "com.apple.Health", "com.apple.Home", "com.apple.tips", "com.apple.stocks", "com.apple.reminders", "com.apple.Passbook", "com.apple.iBooks", "com.apple.itunesu", "com.apple.purplebuddy", "com.apple.springboard", "com.apple.springboard.SpringBoard" ); }; }
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Filter</key>
+	<dict>
+		<key>Bundles</key>
+		<array>
+			<string>com.apple.UIKit</string>
+			<string>com.apple.WebKit</string>
+		</array>
+	</dict>
+</dict>
+</plist>

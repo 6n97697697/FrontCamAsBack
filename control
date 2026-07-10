@@ -1,8 +1,8 @@
 Package: com.frontcamasback
 Name: FrontCamAsBack
 Depends: ellekit (>= 1.0)
-Version: 1.0.1
-Architecture: iphoneos-arm
+Version: 1.0.2
+Architecture: iphoneos-arm64
 Description: Replaces broken rear camera with front camera video stream while keeping all device properties appearing as rear camera.
 Maintainer: FrontCamAsBack Dev
 Author: FrontCamAsBack Dev
