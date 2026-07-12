@@ -160,7 +160,6 @@ static BOOL FCB_SwapPixelBuffer(CVPixelBufferRef dest) {
 
     size_t destWidth = CVPixelBufferGetWidth(dest);
     size_t destHeight = CVPixelBufferGetHeight(dest);
-    size_t srcWidth = CVPixelBufferGetWidth(src);
     size_t srcHeight = CVPixelBufferGetHeight(src);
 
     char *destBase = (char *)CVPixelBufferGetBaseAddress(dest);
