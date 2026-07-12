@@ -1,7 +1,7 @@
 Package: com.frontcamasback
 Name: FrontCamAsBack
 Version: 1.0.5
-Architecture: iphoneos-arm64
+Architecture: iphoneos-arm64e
 Description: Diagnostic v9 - minimal log only.
 Maintainer: FrontCamAsBack Dev
 Author: FrontCamAsBack Dev
