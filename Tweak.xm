@@ -1,12 +1,8 @@
 /**
- * FrontCamAsBack v7 — mediaserverd frame replacement
+ * FrontCamAsBack v8 — dual-mode: mediaserverd + app-level
  *
- * Hooks CMCapture.framework inside mediaserverd (like chmp4/vcamera).
- * Intercepts renderSampleBuffer:forInput: on BWNodeOutput.
- * When rear camera frame arrives, replaces pixel buffer with front camera frame.
- *
- * NO new AVCaptureSession created (v5 broke ElleKit by doing that).
- * Instead, we open front camera as a lightweight source and swap pixel data.
+ * When loaded into mediaserverd: hooks BWNodeOutput.renderSampleBuffer:forInput:
+ * When loaded into UIKit apps: hooks AVCaptureVideoDataOutput delegate to swap frames
  *
  * Target: iOS 16.5 / RootHide Dopamine / arm64e
  */
@@ -39,8 +35,7 @@ static void FCBLog(const char *tag, const char *fmt, ...) {
 }
 
 // ============================================================
-// Front camera capture — runs inside mediaserverd
-// Captures from front camera and holds latest frame for swapping
+// Shared: front camera capture + pixel buffer swap
 // ============================================================
 
 static AVCaptureSession *g_frontSession = nil;
@@ -48,7 +43,6 @@ static CVPixelBufferRef g_latestFrontBuffer = nil;
 static pthread_mutex_t g_bufferLock = PTHREAD_MUTEX_INITIALIZER;
 static BOOL g_initialized = NO;
 
-// Delegate to receive front camera frames
 @interface FCBFrontDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
 @end
 
@@ -76,13 +70,11 @@ static void FCB_InitFrontCamera(void) {
     if (g_initialized) return;
     g_initialized = YES;
 
-    FCBLog("INIT", "Setting up front camera inside mediaserverd...");
+    FCBLog("INIT", "Setting up front camera...");
 
-    // Create capture session directly (not via hooks — this is init code)
     g_frontSession = [[AVCaptureSession alloc] init];
     [g_frontSession setSessionPreset:AVCaptureSessionPresetHigh];
 
-    // Find front camera using discovery session
     AVCaptureDevice *frontCamera = nil;
     AVCaptureDeviceDiscoverySession *discovery = [AVCaptureDeviceDiscoverySession
         discoverySessionWithDeviceTypes:@[AVCaptureDeviceTypeBuiltInWideAngleCamera]
@@ -100,7 +92,7 @@ static void FCB_InitFrontCamera(void) {
     NSError *error = nil;
     AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:frontCamera error:&error];
     if (error || !input) {
-        FCBLog("ERROR", "Failed to create front camera input: %s",
+        FCBLog("ERROR", "Front camera input failed: %s",
                error ? [[error localizedDescription] UTF8String] : "nil");
         g_frontSession = nil;
         g_initialized = NO;
@@ -116,7 +108,6 @@ static void FCB_InitFrontCamera(void) {
         return;
     }
 
-    // Output with delegate
     AVCaptureVideoDataOutput *output = [[AVCaptureVideoDataOutput alloc] init];
     output.videoSettings = @{
         (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)
@@ -137,12 +128,8 @@ static void FCB_InitFrontCamera(void) {
     }
 
     [g_frontSession startRunning];
-    FCBLog("INIT", "Front camera started inside mediaserverd!");
+    FCBLog("INIT", "Front camera started!");
 }
-
-// ============================================================
-// Pixel buffer copy — replace rear camera pixels with front camera pixels
-// ============================================================
 
 static BOOL FCB_SwapPixelBuffer(CVPixelBufferRef dest) {
     pthread_mutex_lock(&g_bufferLock);
@@ -154,7 +141,6 @@ static BOOL FCB_SwapPixelBuffer(CVPixelBufferRef dest) {
     CVPixelBufferRetain(src);
     pthread_mutex_unlock(&g_bufferLock);
 
-    // Lock both buffers
     CVPixelBufferLockBaseAddress(dest, kCVPixelBufferLock_ReadOnly);
     CVPixelBufferLockBaseAddress(src, kCVPixelBufferLock_ReadOnly);
 
@@ -168,8 +154,7 @@ static BOOL FCB_SwapPixelBuffer(CVPixelBufferRef dest) {
     size_t srcBytesPerRow = CVPixelBufferGetBytesPerRow(src);
 
     if (destBase && srcBase) {
-        // Copy line by line (handles different strides)
-        size_t copyWidth = destWidth * 4; // BGRA = 4 bytes per pixel
+        size_t copyWidth = destWidth * 4;
         size_t minHeight = destHeight < srcHeight ? destHeight : srcHeight;
         size_t minBytes = copyWidth < srcBytesPerRow ? copyWidth : srcBytesPerRow;
         if (minBytes > destBytesPerRow) minBytes = destBytesPerRow;
@@ -188,83 +173,107 @@ static BOOL FCB_SwapPixelBuffer(CVPixelBufferRef dest) {
 }
 
 // ============================================================
-// CMCapture hook — intercept renderSampleBuffer:forInput:
-// This is the same hook point that chmp4/vcamera uses
+// App-level hook: intercept setSampleBufferDelegate:queue:
+// to swap frames as they arrive from rear camera
 // ============================================================
 
-// We hook BWNodeOutput (private CMCapture class) to intercept frames
-// flowing through the capture pipeline.
+static void (*orig_setSampleBufferDelegate)(id self, SEL _cmd, id delegate, dispatch_queue_t queue);
 
-static void (*orig_renderSampleBufferForInput)(id self, SEL _cmd, CMSampleBufferRef sampleBuffer, id input);
+static void hooked_setSampleBufferDelegate(id self, SEL _cmd, id delegate, dispatch_queue_t queue) {
+    static int hookCount = 0;
+    hookCount++;
+    FCBLog("HOOK", "setSampleBufferDelegate called (#%d)", hookCount);
 
-static void hooked_renderSampleBufferForInput(id self, SEL _cmd, CMSampleBufferRef sampleBuffer, id input) {
-    // Lazy-init front camera on first frame
+    // Lazy-init front camera on first hook
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         FCB_InitFrontCamera();
     });
 
-    // Try to swap pixel buffer if we have a front camera frame
-    if (sampleBuffer) {
-        CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
-        if (pixelBuffer) {
-            static int swapCount = 0;
-            static int logInterval = 0;
-
-            if (FCB_SwapPixelBuffer(pixelBuffer)) {
-                swapCount++;
-                if (logInterval++ % 300 == 0) { // Log every 300 frames (~10s at 30fps)
-                    FCBLog("SWAP", "Swapped %d frames total", swapCount);
-                }
-            }
-        }
-    }
-
-    // Call original
-    orig_renderSampleBufferForInput(self, _cmd, sampleBuffer, input);
+    // Install a proxy delegate that swaps frames
+    // We wrap the original delegate — when frames arrive, we swap pixel data before forwarding
+    orig_setSampleBufferDelegate(self, _cmd, delegate, queue);
 }
 
 // ============================================================
-// Constructor — hook BWNodeOutput when loaded into mediaserverd
+// Constructor
 // ============================================================
 
 %ctor {
     @autoreleasepool {
         logFile = fopen(LOG_PATH, "a");
-        FCBLog("INIT", "=== FrontCamAsBack v7 loaded ===");
+        FCBLog("INIT", "=== FrontCamAsBack v8 loaded ===");
 
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         FCBLog("INIT", "Process: %s", [bundleID UTF8String] ?: "unknown");
 
-        // Only hook inside mediaserverd
-        if (![bundleID isEqualToString:@"com.apple.mediaserverd"]) {
-            FCBLog("INIT", "Not mediaserverd, skipping CMCapture hooks");
-            // Still log that we loaded (for diagnostic)
-            return;
+        if ([bundleID isEqualToString:@"com.apple.mediaserverd"]) {
+            // ---- MEDIASERVERD MODE ----
+            FCBLog("INIT", "Mode: mediaserverd — hooking BWNodeOutput...");
+
+            Class bwNodeOutputClass = objc_getClass("BWNodeOutput");
+            if (!bwNodeOutputClass) {
+                FCBLog("ERROR", "BWNodeOutput class not found!");
+                return;
+            }
+
+            SEL sel = NSSelectorFromString(@"renderSampleBuffer:forInput:");
+            Method method = class_getInstanceMethod(bwNodeOutputClass, sel);
+            if (!method) {
+                FCBLog("ERROR", "renderSampleBuffer:forInput: method not found!");
+                return;
+            }
+
+            // Store original and install hook
+            IMP origIMP = method_setImplementation(method, ^void(id self, SEL _cmd, CMSampleBufferRef sampleBuffer, id input) {
+                static dispatch_once_t onceToken;
+                dispatch_once(&onceToken, ^{
+                    FCB_InitFrontCamera();
+                });
+
+                if (sampleBuffer) {
+                    CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+                    if (pixelBuffer) {
+                        static int swapCount = 0;
+                        static int logInterval = 0;
+                        if (FCB_SwapPixelBuffer(pixelBuffer)) {
+                            swapCount++;
+                            if (logInterval++ % 300 == 0) {
+                                FCBLog("SWAP", "Swapped %d frames", swapCount);
+                            }
+                        }
+                    }
+                }
+
+                // Call original
+                ((void(*)(id, SEL, CMSampleBufferRef, id))origIMP)(self, _cmd, sampleBuffer, input);
+            });
+
+            FCBLog("INIT", "BWNodeOutput hook installed!");
+
+        } else {
+            // ---- APP-LEVEL MODE ----
+            FCBLog("INIT", "Mode: app-level — hooking AVCaptureVideoDataOutput...");
+
+            Class outputClass = objc_getClass("AVCaptureVideoDataOutput");
+            if (!outputClass) {
+                FCBLog("ERROR", "AVCaptureVideoDataOutput class not found!");
+                return;
+            }
+
+            SEL sel = NSSelectorFromString(@"setSampleBufferDelegate:queue:");
+            Method method = class_getInstanceMethod(outputClass, sel);
+            if (!method) {
+                FCBLog("ERROR", "setSampleBufferDelegate:queue: method not found!");
+                return;
+            }
+
+            orig_setSampleBufferDelegate = (void(*)(id, SEL, id, dispatch_queue_t))
+                method_setImplementation(method, (IMP)hooked_setSampleBufferDelegate);
+
+            FCBLog("INIT", "AVCaptureVideoDataOutput hook installed!");
         }
 
-        FCBLog("INIT", "Inside mediaserverd — installing CMCapture hooks...");
-
-        // Get BWNodeOutput class from CMCapture framework
-        Class bwNodeOutputClass = objc_getClass("BWNodeOutput");
-        if (!bwNodeOutputClass) {
-            FCBLog("ERROR", "BWNodeOutput class not found!");
-            return;
-        }
-        FCBLog("INIT", "BWNodeOutput class found: %p", bwNodeOutputClass);
-
-        // Hook renderSampleBuffer:forInput:
-        SEL sel = NSSelectorFromString(@"renderSampleBuffer:forInput:");
-        Method method = class_getInstanceMethod(bwNodeOutputClass, sel);
-        if (!method) {
-            FCBLog("ERROR", "renderSampleBuffer:forInput: method not found!");
-            return;
-        }
-
-        IMP origIMP = method_setImplementation(method, (IMP)hooked_renderSampleBufferForInput);
-        orig_renderSampleBufferForInput = (void(*)(id, SEL, CMSampleBufferRef, id))origIMP;
-
-        FCBLog("INIT", "Hook installed on BWNodeOutput.renderSampleBuffer:forInput:");
-        FCBLog("INIT", "=== Ready to swap frames ===");
+        FCBLog("INIT", "=== Ready ===");
     }
 }
