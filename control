@@ -1,8 +1,8 @@
 Package: com.frontcamasback
 Name: FrontCamAsBack
-Version: 1.0.4
+Version: 1.0.5
 Architecture: iphoneos-arm64
-Description: Replaces broken rear camera with front camera video stream at mediaserverd level.
+Description: Diagnostic v9 - minimal log only.
 Maintainer: FrontCamAsBack Dev
 Author: FrontCamAsBack Dev
 Section: Tweaks
