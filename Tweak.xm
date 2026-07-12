@@ -17,6 +17,7 @@
 #import <objc/runtime.h>
 #import <stdio.h>
 #import <string.h>
+#import <pthread.h>
 
 #define LOG_PATH "/tmp/FrontCamAsBack.log"
 
@@ -81,14 +82,13 @@ static void FCB_InitFrontCamera(void) {
     g_frontSession = [[AVCaptureSession alloc] init];
     [g_frontSession setSessionPreset:AVCaptureSessionPresetHigh];
 
-    // Find front camera
+    // Find front camera using discovery session
     AVCaptureDevice *frontCamera = nil;
-    for (AVCaptureDevice *device in [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo]) {
-        if (device.position == AVCaptureDevicePositionFront) {
-            frontCamera = device;
-            break;
-        }
-    }
+    AVCaptureDeviceDiscoverySession *discovery = [AVCaptureDeviceDiscoverySession
+        discoverySessionWithDeviceTypes:@[AVCaptureDeviceTypeBuiltInWideAngleCamera]
+        mediaType:AVMediaTypeVideo
+        position:AVCaptureDevicePositionFront];
+    frontCamera = discovery.devices.firstObject;
 
     if (!frontCamera) {
         FCBLog("ERROR", "No front camera found!");
@@ -163,8 +163,8 @@ static BOOL FCB_SwapPixelBuffer(CVPixelBufferRef dest) {
     size_t srcWidth = CVPixelBufferGetWidth(src);
     size_t srcHeight = CVPixelBufferGetHeight(src);
 
-    void *destBase = CVPixelBufferGetBaseAddress(dest);
-    void *srcBase = CVPixelBufferGetBaseAddress(src);
+    char *destBase = (char *)CVPixelBufferGetBaseAddress(dest);
+    char *srcBase = (char *)CVPixelBufferGetBaseAddress(src);
     size_t destBytesPerRow = CVPixelBufferGetBytesPerRow(dest);
     size_t srcBytesPerRow = CVPixelBufferGetBytesPerRow(src);
 
