@@ -196,6 +196,35 @@ static void hooked_setSampleBufferDelegate(id self, SEL _cmd, id delegate, dispa
 }
 
 // ============================================================
+// Mediaserverd-mode hook function
+// ============================================================
+
+static void (*orig_renderSampleBuffer)(id self, SEL _cmd, CMSampleBufferRef sampleBuffer, id input);
+
+static void hooked_renderSampleBuffer(id self, SEL _cmd, CMSampleBufferRef sampleBuffer, id input) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        FCB_InitFrontCamera();
+    });
+
+    if (sampleBuffer) {
+        CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+        if (pixelBuffer) {
+            static int swapCount = 0;
+            static int logInterval = 0;
+            if (FCB_SwapPixelBuffer(pixelBuffer)) {
+                swapCount++;
+                if (logInterval++ % 300 == 0) {
+                    FCBLog("SWAP", "Swapped %d frames", swapCount);
+                }
+            }
+        }
+    }
+
+    orig_renderSampleBuffer(self, _cmd, sampleBuffer, input);
+}
+
+// ============================================================
 // Constructor
 // ============================================================
 
@@ -224,30 +253,8 @@ static void hooked_setSampleBufferDelegate(id self, SEL _cmd, id delegate, dispa
                 return;
             }
 
-            // Store original and install hook
-            IMP origIMP = method_setImplementation(method, ^void(id self, SEL _cmd, CMSampleBufferRef sampleBuffer, id input) {
-                static dispatch_once_t onceToken;
-                dispatch_once(&onceToken, ^{
-                    FCB_InitFrontCamera();
-                });
-
-                if (sampleBuffer) {
-                    CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
-                    if (pixelBuffer) {
-                        static int swapCount = 0;
-                        static int logInterval = 0;
-                        if (FCB_SwapPixelBuffer(pixelBuffer)) {
-                            swapCount++;
-                            if (logInterval++ % 300 == 0) {
-                                FCBLog("SWAP", "Swapped %d frames", swapCount);
-                            }
-                        }
-                    }
-                }
-
-                // Call original
-                ((void(*)(id, SEL, CMSampleBufferRef, id))origIMP)(self, _cmd, sampleBuffer, input);
-            });
+            orig_renderSampleBuffer = (void(*)(id, SEL, CMSampleBufferRef, id))
+                method_setImplementation(method, (IMP)hooked_renderSampleBuffer);
 
             FCBLog("INIT", "BWNodeOutput hook installed!");
 
